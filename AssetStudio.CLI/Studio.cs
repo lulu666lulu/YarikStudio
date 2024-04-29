@@ -315,7 +315,13 @@ namespace AssetStudio.CLI
                         var preloadEnd = preloadIndex + preloadSize;
                         for (int k = preloadIndex; k < preloadEnd; k++)
                         {
-                            containers.Add((m_AssetBundle.m_PreloadTable[k], m_Container.Key));
+                            try
+                            {
+                                containers.Add((m_AssetBundle.m_PreloadTable[k], m_Container.Key));
+                            }
+                            catch (ArgumentOutOfRangeException)
+                            {
+                            }
                         }
                     }
 
