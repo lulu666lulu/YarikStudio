@@ -2,12 +2,13 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using AssetStudio.CLI.Properties;
 using Newtonsoft.Json;
 using static AssetStudio.CLI.Studio;
 
-namespace AssetStudio.CLI 
+namespace AssetStudio.CLI
 {
     public class Program
     {
@@ -59,18 +60,18 @@ namespace AssetStudio.CLI
                         var typeStr = o.TypeFilter[i];
                         var type = ClassIDType.UnknownType;
                         var flag = TypeFlag.Both;
-                    
+
                         try
                         {
                             if (typeStr.Contains(':'))
                             {
                                 var param = typeStr.Split(':');
-                    
+
                                 flag = (TypeFlag)Enum.Parse(typeof(TypeFlag), param[1], true);
-                    
+
                                 typeStr = param[0];
                             }
-                    
+
                             type = (ClassIDType)Enum.Parse(typeof(ClassIDType), typeStr, true);
 
                             if (type == ClassIDType.Texture2D)
@@ -81,12 +82,12 @@ namespace AssetStudio.CLI
                             {
                                 exportMaterial = flag.HasFlag(TypeFlag.Export);
                             }
-                    
+
                             TypeFlags.SetType(type, flag.HasFlag(TypeFlag.Parse), flag.HasFlag(TypeFlag.Export));
-                    
+
                             classTypeFilterList.Add(type);
                         }
-                        catch(Exception e)
+                        catch (Exception e)
                         {
                             Logger.Error($"{typeStr} has invalid format, skipping...");
                             continue;
@@ -106,7 +107,7 @@ namespace AssetStudio.CLI
                         {
                             TypeFlags.SetType(ClassIDType.Animator, true, false);
                         }
-                        else if(ClassIDType.Animator.CanExport())
+                        else if (ClassIDType.Animator.CanExport())
                         {
                             TypeFlags.SetType(ClassIDType.GameObject, true, false);
                         }
@@ -118,9 +119,16 @@ namespace AssetStudio.CLI
                     TypeFlags.SetType(ClassIDType.AssetBundle, true, false);
                 }
 
-                assetsManager.Silent = o.Silent;
-                assetsManager.Game = game;
-                assetsManager.SpecifyUnityVersion = o.UnityVersion;
+                var options = new AssetsManagerOptions
+                {
+                    Silent = o.Silent,
+                    Game = game,
+                    SpecifyUnityVersion = o.UnityVersion
+                };
+
+                // assetsManager.Silent = o.Silent;
+                // assetsManager.Game = game;
+                // assetsManager.SpecifyUnityVersion = o.UnityVersion;
                 o.Output.Create();
 
                 if (o.Key != default)
@@ -152,7 +160,8 @@ namespace AssetStudio.CLI
                     else
                     {
                         AssetsHelper.LoadCABMapInternal(o.MapName);
-                        assetsManager.ResolveDependencies = true;
+                        // assetsManager.ResolveDependencies = true;
+                        options.ResolveDependencies = true;
                     }
                 }
                 if (o.MapOp.HasFlag(MapOpType.AssetMap))
@@ -173,23 +182,50 @@ namespace AssetStudio.CLI
                 if (o.MapOp.Equals(MapOpType.None) || o.MapOp.HasFlag(MapOpType.Load))
                 {
                     var i = 0;
+                    var fileCount = 0;
 
                     var path = Path.GetDirectoryName(Path.GetFullPath(files[0]));
                     ImportHelper.MergeSplitAssets(path);
                     var toReadFile = ImportHelper.ProcessingSplitFiles(files.ToList());
 
                     var fileList = new List<string>(toReadFile);
-                    foreach (var file in fileList)
+                    Logger.Info($"Found {fileList.Count} files.");
+
+                    var parallelOptions = new ParallelOptions()
                     {
-                        assetsManager.LoadFiles(file);
-                        if (assetsManager.assetsFileList.Count > 0)
+                        MaxDegreeOfParallelism = Environment.ProcessorCount
+                    };
+
+                    Parallel.ForEach(fileList, parallelOptions, ExportCore);
+
+                    void ExportCore(string file)
+                    {
+                        var studio = Studio.Create(options);
+                        studio.assetsManager.LoadFiles(file);
+                        if (studio.assetsManager.assetsFileList.Count > 0)
                         {
-                            BuildAssetData(classTypeFilter, o.NameFilter, o.ContainerFilter, ref i);
-                            ExportAssets(o.Output.FullName, exportableAssets, o.GroupAssetsType, o.AssetExportType);
+                            studio.BuildAssetData(classTypeFilter, o.NameFilter, o.ContainerFilter, ref i);
+                            studio.ExportAssets(o.Output.FullName, studio.exportableAssets, o.GroupAssetsType, o.AssetExportType);
                         }
-                        exportableAssets.Clear();
-                        assetsManager.Clear();
+
+                        Interlocked.Add(ref fileCount, 1);
+
+                        Logger.Info("");
+                        Logger.Info($"Processed {fileCount}/{fileList.Count} files.");
+                        Logger.Info("");
                     }
+
+                    // foreach (var file in fileList)
+                    // {
+                    //     assetsManager.LoadFiles(file);
+                    //     if (assetsManager.assetsFileList.Count > 0)
+                    //     {
+                    //         BuildAssetData(classTypeFilter, o.NameFilter, o.ContainerFilter, ref i);
+                    //         ExportAssets(o.Output.FullName, exportableAssets, o.GroupAssetsType, o.AssetExportType);
+                    //     }
+                    //     exportableAssets.Clear();
+                    //     assetsManager.Clear();
+                    // }
                 }
             }
             catch (Exception e)
